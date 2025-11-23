@@ -8,7 +8,7 @@ const PAY_NAME = process.env.PAY_NAME;
 const PAY_PRICE = process.env.PAY_PRICE;
 
 if (!TOKEN || !ADMIN_ID) {
-  console.error("❌ BOT_TOKEN yoki ADMIN_ID yo‘q.");
+  console.error("❌ BOT_TOKEN yoki ADMIN_ID yo‘q. Env variables ni tekshiring.");
   process.exit(1);
 }
 
@@ -17,9 +17,9 @@ const bot = new TelegramBot(TOKEN, { polling: true });
 // ==== STATE ====
 const usedLogins = {}; // { userId: { login, pass } }
 const modeMap = {};    // { userId: "feedback" | "problem" | "support" | "pay_name" | "pay_check" }
-const tempData = {};   // { userId: { fullName: ... } }
+const tempData = {};   // { userId: { fullName: "..." } }
 
-// ==== START MENU ====
+// ==== /start ====
 bot.onText(/\/start/, msg => {
   const chatId = msg.chat.id;
 
@@ -39,44 +39,62 @@ bot.onText(/\/start/, msg => {
   );
 });
 
-// ==== TO‘LOV MA’LUMOTI ====
+// ==== TO'LOV MA'LUMOTI ====
 bot.onText(/To'lov ma'lumoti/, msg => {
   const chatId = msg.chat.id;
 
   bot.sendMessage(
     chatId,
-    `💳 TO'LOV MA'LUMOTI:\n\n` +
+    "💳 TO'LOV MA'LUMOTI:\n\n" +
     `Karta: ${PAY_CARD || "Karta kiritilmagan"}\n` +
     `Ism-familiya: ${PAY_NAME || "Kiritilmagan"}\n` +
     `Narx: ${PAY_PRICE || "Kiritilmagan"}\n\n` +
-    `To‘lov qilganingizdan so‘ng 📸 chekingizni botga yuboring.`
+    "To‘lov qilganingizdan so‘ng 📸 chekingizni botga yuboring."
   );
 });
 
-// ==== LOGIN SO'ROVI (avtomatik berilmaydi) ====
+// ==== LOGIN SO'ROVI (avtomatik login bermaydi) ====
 bot.onText(/Get Login/, msg => {
   const chatId = msg.chat.id;
   const name = msg.from.first_name || "Foydalanuvchi";
 
+  // Agar oldin login berilgan bo'lsa — eski loginni ko'rsatamiz
   if (usedLogins[chatId]) {
     const l = usedLogins[chatId];
     bot.sendMessage(
       chatId,
-      `🔐 Sizga avval berilgan login:\nLogin: ${l.login}\nParol: ${l.pass}`
+      "🔐 Sizga avval berilgan login mavjud:\n" +
+      `Login: ${l.login}\nParol: ${l.pass}`
     );
     return;
   }
 
+  // 1) To‘lov ma’lumoti
   bot.sendMessage(
     chatId,
-    "⏳ Login so‘rovingiz qabul qilindi.\nAdmin tomonidan tekshirilyapti."
+    "💳 TO'LOV MA'LUMOTI:\n\n" +
+    `Karta: ${PAY_CARD || "Karta kiritilmagan"}\n` +
+    `Ism-familiya: ${PAY_NAME || "Kiritilmagan"}\n` +
+    `Narx: ${PAY_PRICE || "Kiritilmagan"}\n`
   );
 
+  // 2) Ogohlantirish
+  bot.sendMessage(
+    chatId,
+    "⚠️ *Cheksiz to‘lov qabul qilinmaydi!*\n" +
+    "Iltimos, *to‘lov chekini va to‘liq ism-familiyangizni* bot orqali yuboring.\n\n" +
+    "⏳ Login berilishi uchun to‘lov admin tomonidan tekshiriladi.",
+    { parse_mode: "Markdown" }
+  );
+
+  // 3) Admin uchun signal
   bot.sendMessage(
     ADMIN_ID,
-    `📥 YANGI LOGIN SO‘ROVI:\nUser ID: ${chatId}\nIsmi: ${name}\n\n` +
-    `Agar to‘lov tasdiqlangan bo‘lsa, login ber:\n` +
-    `👉 /give ${chatId} LOGIN PAROL`
+    "📥 YANGI LOGIN SO‘ROVI:\n" +
+    `User ID: ${chatId}\n` +
+    `Ismi: ${name}\n\n` +
+    "Foydalanuvchi login so‘radi. To‘lovni chek orqali tekshiring.\n\n" +
+    `Tasdiqlansa: /give ${chatId} LOGIN PAROL`
   );
 });
 
@@ -91,12 +109,12 @@ bot.onText(/To'lov chekini yuborish/, msg => {
 });
 
 // ==== ADMIN LOGIN BERISH ====
-// Format: /give USERID LOGIN PAROL
+// format: /give USERID LOGIN PAROL
 bot.onText(/^\/give (\d+) (\S+) (\S+)/, (msg, match) => {
   const adminId = msg.chat.id;
 
   if (adminId.toString() !== ADMIN_ID.toString()) {
-    return bot.sendMessage(adminId, "⛔ Faqat admin ishlatishi mumkin!");
+    return bot.sendMessage(adminId, "⛔ Bu komanda faqat admin uchun!");
   }
 
   const userId = match[1];
@@ -107,101 +125,153 @@ bot.onText(/^\/give (\d+) (\S+) (\S+)/, (msg, match) => {
 
   bot.sendMessage(
     userId,
-    `🔐 Login berildi!\nLogin: ${login}\nParol: ${pass}`
+    "🔐 Login berildi!\n" +
+    `Login: ${login}\nParol: ${pass}`
   );
 
   bot.sendMessage(
     ADMIN_ID,
-    `✅ Login foydalanuvchiga yuborildi.\nUser ID: ${userId}`
+    "✅ Login foydalanuvchiga yuborildi.\n" +
+    `User ID: ${userId}`
   );
 });
 
 // ==== ADMIN REPLY ====
-// Format: /reply USERID Matn
+// format: /reply USERID Javob matni
 bot.onText(/^\/reply (\d+) ([\s\S]+)/, (msg, match) => {
   const adminId = msg.chat.id;
 
   if (adminId.toString() !== ADMIN_ID.toString()) {
-    return bot.sendMessage(adminId, "⛔ Faqat admin ishlatishi mumkin!");
+    return bot.sendMessage(adminId, "⛔ Bu komanda faqat admin uchun!");
   }
 
   const userId = match[1];
   const text = match[2];
 
-  bot.sendMessage(userId, `📩 Admin javobi:\n${text}`);
+  bot.sendMessage(userId, `📩 Admin javobi:\n\n${text}`);
   bot.sendMessage(adminId, "✅ Javob yuborildi.");
 });
 
-// ==== GENERAL TEXT HANDLER ====
+// ==== FEEDBACK ====
+bot.onText(/Send Feedback/, msg => {
+  const chatId = msg.chat.id;
+  modeMap[chatId] = "feedback";
+  bot.sendMessage(chatId, "📝 Fikringizni yozib yuboring:");
+});
+
+// ==== PROBLEM REPORT ====
+bot.onText(/Report a Problem/, msg => {
+  const chatId = msg.chat.id;
+  modeMap[chatId] = "problem";
+  bot.sendMessage(chatId, "⚠️ Qanday nosozlik bo‘ldi? Batafsil yozing:");
+});
+
+// ==== SUPPORT ====
+bot.onText(/Contact Support/, msg => {
+  const chatId = msg.chat.id;
+  modeMap[chatId] = "support";
+  bot.sendMessage(chatId, "👤 Savolingizni yozing. Sizga javob beramiz.");
+});
+
+// ==== MATN XABARLAR (mode bo‘yicha) ====
 bot.on("message", msg => {
   const chatId = msg.chat.id;
   const text = msg.text;
 
+  // komandalar /start, /give, /reply va hokazolarni bu yerda qayta ishlamaymiz
   if (!text || text.startsWith("/")) return;
 
   const mode = modeMap[chatId];
-
   if (!mode) return;
 
-  // === PAYMENT NAME ===
+  // 1) To'lov uchun ism-familiya
   if (mode === "pay_name") {
+    tempData[chatId] = tempData[chatId] || {};
     tempData[chatId].fullName = text;
+
     modeMap[chatId] = "pay_check";
 
     bot.sendMessage(
       chatId,
-      "Rahmat! Endi to‘lov chekini 📸 rasm qilib yuboring."
+      "Rahmat! ✅ Endi to‘lov chekini 📸 rasm qilib yuboring."
     );
     return;
   }
 
-  // === FEEDBACK ===
+  // 2) Feedback
   if (mode === "feedback") {
-    bot.sendMessage(ADMIN_ID, `📝 FEEDBACK:\nUser: ${chatId}\n${text}`);
-    bot.sendMessage(chatId, "Rahmat! Fikringiz yuborildi 😊");
+    bot.sendMessage(
+      ADMIN_ID,
+      "📝 FEEDBACK:\n" +
+      `User ID: ${chatId}\n\n` +
+      text
+    );
+    bot.sendMessage(chatId, "Rahmat! Fikringiz yuborildi. 😊");
     modeMap[chatId] = null;
     return;
   }
 
-  // === PROBLEM ===
+  // 3) Problem
   if (mode === "problem") {
-    bot.sendMessage(ADMIN_ID, `⚠️ PROBLEM:\nUser: ${chatId}\n${text}`);
-    bot.sendMessage(chatId, "Qabul qilindi 🙏");
+    bot.sendMessage(
+      ADMIN_ID,
+      "⚠️ PROBLEM REPORT:\n" +
+      `User ID: ${chatId}\n\n` +
+      text
+    );
+    bot.sendMessage(
+      chatId,
+      "Xabaringiz qabul qilindi. Nosozlik tez orada ko‘rib chiqiladi. 🙏"
+    );
     modeMap[chatId] = null;
     return;
   }
 
-  // === SUPPORT ===
+  // 4) Support
   if (mode === "support") {
-    bot.sendMessage(ADMIN_ID, `👤 SUPPORT:\nUser: ${chatId}\n${text}`);
-    bot.sendMessage(chatId, "Savolingiz yuborildi 😊");
+    bot.sendMessage(
+      ADMIN_ID,
+      "👤 SUPPORT XABAR:\n" +
+      `User ID: ${chatId}\n\n` +
+      text
+    );
+    bot.sendMessage(
+      chatId,
+      "Rahmat! Savolingiz yuborildi. Javob tez orada beriladi. 😊"
+    );
     modeMap[chatId] = null;
     return;
   }
 });
 
-// ==== PHOTO HANDLER (CHEK) ====
+// ==== PHOTO HANDLER (CHEK RASMI) ====
 bot.on("photo", async msg => {
   const chatId = msg.chat.id;
   const mode = modeMap[chatId];
 
   if (mode !== "pay_check") return;
 
-  const fullName = tempData[chatId]?.fullName || "Noma’lum";
+  const fullName =
+    (tempData[chatId] && tempData[chatId].fullName) || "Noma’lum";
+
   const photos = msg.photo;
   const fileId = photos[photos.length - 1].file_id;
 
   await bot.sendMessage(
     ADMIN_ID,
-    `💳 TO‘LOV CHEK KELDI:\nUser ID: ${chatId}\nIsm-fam: ${fullName}`
+    "💳 TO‘LOV CHEK KELDI:\n" +
+    `User ID: ${chatId}\n` +
+    `Ism-familiyasi: ${fullName}`
   );
 
   await bot.sendPhoto(ADMIN_ID, fileId);
 
   await bot.sendMessage(
     chatId,
-    "Rahmat! Chekingiz admin tomonidan tekshiriladi ⏳"
+    "Rahmat! ✅ Chekingiz admin tomonidan tekshiriladi.\n" +
+    "Tasdiqlangandan so‘ng login-parol yuboriladi."
   );
 
   modeMap[chatId] = null;
+  delete tempData[chatId];
 });
