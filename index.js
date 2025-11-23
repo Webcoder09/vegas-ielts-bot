@@ -30,26 +30,11 @@ bot.onText(/\/start/, msg => {
       reply_markup: {
         keyboard: [
           ["📝 Send Feedback", "⚠️ Report a Problem"],
-          ["🔐 Get Login", "👤 Contact Support"],
-          ["💳 To'lov ma'lumoti", "📸 To'lov chekini yuborish"]
+          ["🔐 Get Login", "👤 Contact Support"]
         ],
         resize_keyboard: true
       }
     }
-  );
-});
-
-// ==== TO'LOV MA'LUMOTI ====
-bot.onText(/To'lov ma'lumoti/, msg => {
-  const chatId = msg.chat.id;
-
-  bot.sendMessage(
-    chatId,
-    "💳 TO'LOV MA'LUMOTI:\n\n" +
-    `Karta: ${PAY_CARD || "Karta kiritilmagan"}\n` +
-    `Ism-familiya: ${PAY_NAME || "Kiritilmagan"}\n` +
-    `Narx: ${PAY_PRICE || "Kiritilmagan"}\n\n` +
-    "To‘lov qilganingizdan so‘ng 📸 chekingizni botga yuboring."
   );
 });
 
@@ -78,11 +63,13 @@ bot.onText(/Get Login/, msg => {
     `Narx: ${PAY_PRICE || "Kiritilmagan"}\n`
   );
 
-  // 2) Ogohlantirish
+  // 2) Ogohlantirish va keyingi qadamlar
   bot.sendMessage(
     chatId,
     "⚠️ *Cheksiz to‘lov qabul qilinmaydi!*\n" +
-    "Iltimos, *to‘lov chekini va to‘liq ism-familiyangizni* bot orqali yuboring.\n\n" +
+    "Iltimos, to‘lov qilganingizdan so‘ng:\n" +
+    "1️⃣ *To‘liq ism-familiyangizni yozing*\n" +
+    "2️⃣ *Keyin to‘lov chekini rasm (screenshot) qilib yuboring*\n\n" +
     "⏳ Login berilishi uchun to‘lov admin tomonidan tekshiriladi.",
     { parse_mode: "Markdown" }
   );
@@ -92,20 +79,14 @@ bot.onText(/Get Login/, msg => {
     ADMIN_ID,
     "📥 YANGI LOGIN SO‘ROVI:\n" +
     `User ID: ${chatId}\n` +
-    `Ismi: ${name}\n\n` +
+    `Ismi (Telegram): ${name}\n\n` +
     "Foydalanuvchi login so‘radi. To‘lovni chek orqali tekshiring.\n\n" +
     `Tasdiqlansa: /give ${chatId} LOGIN PAROL`
   );
-});
 
-// ==== TO'LOV CHEK TUGMASI ====
-bot.onText(/To'lov chekini yuborish/, msg => {
-  const chatId = msg.chat.id;
-
+  // 4) Endi bu userdan keyingi matnni ism-familiya deb qabul qilamiz
   tempData[chatId] = {};
   modeMap[chatId] = "pay_name";
-
-  bot.sendMessage(chatId, "Iltimos, to‘liq ism va familiyangizni yozing:");
 });
 
 // ==== ADMIN LOGIN BERISH ====
@@ -178,13 +159,13 @@ bot.on("message", msg => {
   const chatId = msg.chat.id;
   const text = msg.text;
 
-  // komandalar /start, /give, /reply va hokazolarni bu yerda qayta ishlamaymiz
+  // komandalar ( /start, /give, /reply ) bu yerda qayta ishlanmaydi
   if (!text || text.startsWith("/")) return;
 
   const mode = modeMap[chatId];
   if (!mode) return;
 
-  // 1) To'lov uchun ism-familiya
+  // 1) To'lov uchun ism-familiya (Get Login dan keyingi qadam)
   if (mode === "pay_name") {
     tempData[chatId] = tempData[chatId] || {};
     tempData[chatId].fullName = text;
