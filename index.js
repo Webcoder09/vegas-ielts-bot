@@ -3,9 +3,6 @@ const TelegramBot = require("node-telegram-bot-api");
 // ==== CONFIG (ENV) ====
 const TOKEN = process.env.BOT_TOKEN;
 const ADMIN_ID = process.env.ADMIN_ID;
-const PAY_CARD = process.env.PAY_CARD;
-const PAY_NAME = process.env.PAY_NAME;
-const PAY_PRICE = process.env.PAY_PRICE;
 
 if (!TOKEN || !ADMIN_ID) {
   console.error("❌ BOT_TOKEN yoki ADMIN_ID yo‘q. Env variables ni tekshiring.");
@@ -58,9 +55,9 @@ bot.onText(/Get Login/, msg => {
   bot.sendMessage(
     chatId,
     "💳 TO'LOV MA'LUMOTI:\n\n" +
-    `Karta: "9860 0366 2880 7194"\n` +
-    `Card-holder: "Buxoriddinov Muhammad"\n` +
-    `Narx: "1 oy = 50 000 so'm"\n`
+    `Karta: 9860 0366 2880 7194\n` +
+    `Card-holder: Buxoriddinov Muhammad\n` +
+    `Narx: 1 oy = 50 000 so'm\n`
   );
 
   // Ogohlantirish va qadamlar
@@ -265,5 +262,6 @@ bot.on("photo", async msg => {
   // endi card-holderni kutamiz
   modeMap[chatId] = "card_holder";
 });
+
 
 
