@@ -79,7 +79,7 @@ bot.onText(/Get Login/, msg => {
     "📥 YANGI LOGIN SO‘ROVI:\n" +
     `User ID: ${chatId}\n` +
     `Ismi (Telegram): ${name}\n\n` +
-    "Foydalanuvchi login so‘radi. To‘lovni chek va card-holder bo‘yicha tekshiring.\n\n" +
+    "Foydalanuvchi login so‘radi. To‘lovni chek va ism-familiya bo‘yicha tekshiring.\n\n" +
     `Tasdiqlansa: /give ${chatId} LOGIN PAROL`
   );
 
@@ -258,10 +258,11 @@ bot.on("photo", async msg => {
 
   await bot.sendMessage(
     chatId,
-    "Chek qabul qilindi ✅\nEndi iltimos *card-holder* (karta egasi ismi-familyasi) ni yozing.",
+    "Chek qabul qilindi ✅\nEndi iltimos *ism-familiya* (karta egasi ismi-familyasi) ni yozing.",
     { parse_mode: "Markdown" }
   );
 
   // endi card-holderni kutamiz
   modeMap[chatId] = "card_holder";
 });
+
