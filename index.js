@@ -58,9 +58,9 @@ bot.onText(/Get Login/, msg => {
   bot.sendMessage(
     chatId,
     "💳 TO'LOV MA'LUMOTI:\n\n" +
-    `Karta: ${PAY_CARD || "Karta kiritilmagan"}\n` +
-    `Card-holder: ${PAY_NAME || "Kiritilmagan"}\n` +
-    `Narx: ${PAY_PRICE || "Kiritilmagan"}\n`
+    `Karta: "9860 0366 2880 7194"\n` +
+    `Card-holder: "Buxoriddinov Muhammad"\n` +
+    `Narx: "1 oy = 50 000 so'm"\n`
   );
 
   // Ogohlantirish va qadamlar
@@ -265,4 +265,5 @@ bot.on("photo", async msg => {
   // endi card-holderni kutamiz
   modeMap[chatId] = "card_holder";
 });
+
 
