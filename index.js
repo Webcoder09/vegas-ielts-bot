@@ -16,8 +16,8 @@ const bot = new TelegramBot(TOKEN, { polling: true });
 
 // ==== STATE ====
 const usedLogins = {}; // { userId: { login, pass } }
-const modeMap = {};    // { userId: "feedback" | "problem" | "support" | "pay_name" | "pay_check" }
-const tempData = {};   // { userId: { fullName: "..." } }
+const modeMap = {};    // { userId: "feedback" | "problem" | "support" | "pay_check" | "card_holder" }
+const tempData = {};   // { userId: { cardHolder: "...", fileId: "..." } }
 
 // ==== /start ====
 bot.onText(/\/start/, msg => {
@@ -54,39 +54,38 @@ bot.onText(/Get Login/, msg => {
     return;
   }
 
-  // 1) To‘lov ma’lumoti
+  // To'lov ma'lumoti
   bot.sendMessage(
     chatId,
     "💳 TO'LOV MA'LUMOTI:\n\n" +
     `Karta: ${PAY_CARD || "Karta kiritilmagan"}\n` +
-    `Ism-familiya: ${PAY_NAME || "Kiritilmagan"}\n` +
+    `Card-holder: ${PAY_NAME || "Kiritilmagan"}\n` +
     `Narx: ${PAY_PRICE || "Kiritilmagan"}\n`
   );
 
-  // 2) Ogohlantirish va keyingi qadamlar
+  // Ogohlantirish va qadamlar
   bot.sendMessage(
     chatId,
-    "⚠️ *Cheksiz to‘lov qabul qilinmaydi!*\n" +
-    "Iltimos, to‘lov qilganingizdan so‘ng:\n" +
-    "1️⃣ *To‘liq ism-familiyangizni yozing*\n" +
-    "2️⃣ *Keyin to‘lov chekini rasm (screenshot) qilib yuboring*\n\n" +
+    "⚠️ *Cheksiz to‘lov qabul qilinmaydi!*\n\n" +
+    "1️⃣ Avval *to‘lov chekini (screenshot)* rasm qilib yuboring.\n" +
+    "2️⃣ So‘ngra *card-holder* (karta egasi ismi-familyasi) ni yozing.\n\n" +
     "⏳ Login berilishi uchun to‘lov admin tomonidan tekshiriladi.",
     { parse_mode: "Markdown" }
   );
 
-  // 3) Admin uchun signal
+  // Admin uchun signal
   bot.sendMessage(
     ADMIN_ID,
     "📥 YANGI LOGIN SO‘ROVI:\n" +
     `User ID: ${chatId}\n` +
     `Ismi (Telegram): ${name}\n\n` +
-    "Foydalanuvchi login so‘radi. To‘lovni chek orqali tekshiring.\n\n" +
+    "Foydalanuvchi login so‘radi. To‘lovni chek va card-holder bo‘yicha tekshiring.\n\n" +
     `Tasdiqlansa: /give ${chatId} LOGIN PAROL`
   );
 
-  // 4) Endi bu userdan keyingi matnni ism-familiya deb qabul qilamiz
+  // Endi birinchi navbatda chek kutamiz
   tempData[chatId] = {};
-  modeMap[chatId] = "pay_name";
+  modeMap[chatId] = "pay_check";
 });
 
 // ==== ADMIN LOGIN BERISH ====
@@ -159,23 +158,41 @@ bot.on("message", msg => {
   const chatId = msg.chat.id;
   const text = msg.text;
 
-  // komandalar ( /start, /give, /reply ) bu yerda qayta ishlanmaydi
+  // komandalar bu yerda qayta ishlanmaydi
   if (!text || text.startsWith("/")) return;
 
   const mode = modeMap[chatId];
   if (!mode) return;
 
-  // 1) To'lov uchun ism-familiya (Get Login dan keyingi qadam)
-  if (mode === "pay_name") {
+  // 1) Card-holder (chekdan keyin)
+  if (mode === "card_holder") {
     tempData[chatId] = tempData[chatId] || {};
-    tempData[chatId].fullName = text;
+    tempData[chatId].cardHolder = text;
 
-    modeMap[chatId] = "pay_check";
+    const cardHolder = tempData[chatId].cardHolder || "Noma'lum card-holder";
+    const fileId = tempData[chatId].fileId;
+
+    // Adminga to'lov ma'lumoti
+    bot.sendMessage(
+      ADMIN_ID,
+      "💳 TO‘LOV MA'LUMOTI KELDI:\n" +
+      `User ID: ${chatId}\n` +
+      `Card-holder: ${cardHolder}`
+    );
+
+    // Agar chek rasm bor bo'lsa — yuboramiz
+    if (fileId) {
+      bot.sendPhoto(ADMIN_ID, fileId);
+    }
 
     bot.sendMessage(
       chatId,
-      "Rahmat! ✅ Endi to‘lov chekini 📸 rasm qilib yuboring."
+      "Rahmat! ✅ Ma’lumotlaringiz adminga yuborildi.\n" +
+      "To‘lov tasdiqlangach, login-parol beriladi."
     );
+
+    modeMap[chatId] = null;
+    delete tempData[chatId];
     return;
   }
 
@@ -225,34 +242,26 @@ bot.on("message", msg => {
   }
 });
 
-// ==== PHOTO HANDLER (CHEK RASMI) ====
+// ==== PHOTO HANDLER (BIRINCHI CHEK, KEYIN CARD-HOLDER) ====
 bot.on("photo", async msg => {
   const chatId = msg.chat.id;
   const mode = modeMap[chatId];
 
+  // faqat pay_check holatida chekni qabul qilamiz
   if (mode !== "pay_check") return;
-
-  const fullName =
-    (tempData[chatId] && tempData[chatId].fullName) || "Noma’lum";
 
   const photos = msg.photo;
   const fileId = photos[photos.length - 1].file_id;
 
-  await bot.sendMessage(
-    ADMIN_ID,
-    "💳 TO‘LOV CHEK KELDI:\n" +
-    `User ID: ${chatId}\n` +
-    `Ism-familiyasi: ${fullName}`
-  );
-
-  await bot.sendPhoto(ADMIN_ID, fileId);
+  tempData[chatId] = tempData[chatId] || {};
+  tempData[chatId].fileId = fileId;
 
   await bot.sendMessage(
     chatId,
-    "Rahmat! ✅ Chekingiz admin tomonidan tekshiriladi.\n" +
-    "Tasdiqlangandan so‘ng login-parol yuboriladi."
+    "Chek qabul qilindi ✅\nEndi iltimos *card-holder* (karta egasi ismi-familyasi) ni yozing.",
+    { parse_mode: "Markdown" }
   );
 
-  modeMap[chatId] = null;
-  delete tempData[chatId];
+  // endi card-holderni kutamiz
+  modeMap[chatId] = "card_holder";
 });
