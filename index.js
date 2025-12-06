@@ -1,47 +1,53 @@
 const TelegramBot = require("node-telegram-bot-api");
 
 // ==== CONFIG (ENV) ====
-// Railway'da BOT_TOKEN va ADMIN_ID ni Variables ichiga qo'yasan
-const TOKEN = process.env.BOT_TOKEN;
-const ADMIN_ID = process.env.ADMIN_ID; // string bo'ladi
 
-if (!TOKEN || !ADMIN_ID) {
-  console.error("❌ BOT_TOKEN yoki ADMIN_ID yo‘q. Env variables ni tekshiring.");
+// Railway / .env dan olamiz
+const TOKEN = process.env.BOT_TOKEN;
+const ADMIN_IDS = (process.env.ADMIN_IDS || "")
+  .split(",")
+  .map(s => s.trim())
+  .filter(Boolean);
+
+if (!TOKEN || ADMIN_IDS.length === 0) {
+  console.error("❌ BOT_TOKEN yoki ADMIN_IDS yo‘q. Env variables ni tekshiring.");
   process.exit(1);
 }
+
+const MAIN_ADMIN_ID = ADMIN_IDS[0];
 
 const bot = new TelegramBot(TOKEN, { polling: true });
 
 // ==== STATE ====
 
 // Loginlar – key: userId(string)
-const usedLogins = {}; 
+const usedLogins = {};
 // { userId: { login, pass, startAt, endAt } }
 
 // Rejimlar – key: userId(string)
-const modeMap = {};    
+const modeMap = {};
 // { userId: "feedback"|"problem"|"support"|"pay_check"|"card_holder"|"admin_broadcast" }
 
 // Vaqtincha ma'lumot – chek/card-holder/orderId uchun
-const tempData = {};   
+const tempData = {};
 // { userId: { cardHolder, fileId, orderId } }
 
 // Botni ishlatgan userlar ro‘yxati
-const users = new Set(); // masalan: "123456789"
+const users = new Set(); // "123456789"
 
 // Foydalanuvchi haqida ma'lumot (ism, username)
-const userInfo = {}; 
+const userInfo = {};
 // { userId: { name, username } }
 
 // To‘lov ORDER tizimi
-// orderId: "VGS-0001" kabi
-const orders = {}; 
+// orderId: "VGS-0001"
+const orders = {};
 // { orderId: { orderId, userId, status, cardHolder, checkFileId, createdAt } }
 let nextOrderNum = 1;
 
 // Support TICKET tizimi
 // ticketId: "T-0001"
-const tickets = {}; 
+const tickets = {};
 // { ticketId: { ticketId, userId, type, text, status, createdAt } }
 let nextTicketNum = 1;
 
@@ -74,15 +80,20 @@ function generateTicketId() {
 }
 
 function isAdmin(id) {
-  return id.toString() === ADMIN_ID.toString();
+  return ADMIN_IDS.includes(id.toString());
 }
 
-// Sana formatlash (UZ uslubida)
+function sendToAdmins(text, options = {}) {
+  for (const adminId of ADMIN_IDS) {
+    bot.sendMessage(adminId, text, options).catch(() => {});
+  }
+}
+
 function formatDate(ts) {
   return new Date(ts).toLocaleDateString("uz-UZ");
 }
 
-// Admin uchun login berish + premium muddati hisoblash
+// Admin login berishi + 1 oylik premium muddati
 function giveLoginToUser(userId, login, pass, orderId = null) {
   const now = Date.now();
   const THIRTY_DAYS = 30 * 24 * 60 * 60 * 1000;
@@ -106,19 +117,18 @@ function giveLoginToUser(userId, login, pass, orderId = null) {
     text += `Order ID: ${orderId}\n`;
   }
 
-  bot.sendMessage(userId, text);
+  bot.sendMessage(userId, text).catch(() => {});
 
-  bot.sendMessage(
-    ADMIN_ID,
+  sendToAdmins(
     "✅ Login foydalanuvchiga yuborildi.\n" +
-    `User ID: ${userId} ${name}` +
-    (orderId ? `\nOrder ID: ${orderId}` : "") +
-    `\nPremium: ${startStr} → ${endStr}`
+    `User ID: ${userId} ${name}\n` +
+    (orderId ? `Order ID: ${orderId}\n` : "") +
+    `Premium: ${startStr} → ${endStr}`
   );
 }
 
 
-// ==== ADMIN FUNKSIYALAR ====
+// ==== ADMIN YORDAMCHI FUNKSIYALAR ====
 
 function adminStats(chatId) {
   const totalUsers = users.size;
@@ -318,7 +328,7 @@ bot.onText(/\/cancel/, msg => {
 bot.onText(/\/menu_admin/, msg => {
   const chatId = msg.chat.id;
   if (!isAdmin(chatId)) {
-    return bot.sendMessage(chatId, "⛔ Bu komanda faqat admin uchun!");
+    return bot.sendMessage(chatId, "⛔ Bu komanda faqat adminlar uchun!");
   }
 
   bot.sendMessage(
@@ -328,7 +338,7 @@ bot.onText(/\/menu_admin/, msg => {
   );
 });
 
-// Admin tugmalari: 📊 Stats, 🧾 Logins, 💳 Orders pending, 🎫 Tickets open, 📣 Broadcast, ❌ Close admin menu
+// Admin tugmalari
 bot.onText(/^📊 Stats$/, msg => {
   const chatId = msg.chat.id;
   if (!isAdmin(chatId)) return;
@@ -390,7 +400,7 @@ bot.onText(/Get Login/, msg => {
 
   rememberUser(msg);
 
-  // Agar oldin login berilgan bo'lsa — eski loginni ko'rsatamiz
+  // Agar oldin login berilgan bo'lsa — faqat ma'lumotni ko'rsatamiz, yangi order YO'Q
   if (usedLogins[key]) {
     const l = usedLogins[key];
     const startStr = l.startAt ? formatDate(l.startAt) : "—";
@@ -409,12 +419,12 @@ bot.onText(/Get Login/, msg => {
     return;
   }
 
-  // Order yaratamiz
+  // Yangi order
   const orderId = generateOrderId();
   orders[orderId] = {
     orderId,
     userId: key,
-    status: "pending", // pending | approved | rejected
+    status: "pending",
     cardHolder: null,
     checkFileId: null,
     createdAt: Date.now()
@@ -422,7 +432,6 @@ bot.onText(/Get Login/, msg => {
 
   tempData[key] = { orderId };
 
-  // To'lov ma'lumoti
   bot.sendMessage(
     chatId,
     "💳 TO'LOV MA'LUMOTI:\n\n" +
@@ -442,12 +451,15 @@ bot.onText(/Get Login/, msg => {
     { parse_mode: "Markdown" }
   );
 
-  bot.sendMessage(
-    ADMIN_ID,
+  const info = userInfo[key] || {};
+  const username = info.username ? `@${info.username}` : "username yo‘q";
+
+  sendToAdmins(
     "📥 YANGI LOGIN/TOLÒV SO‘ROVI:\n" +
     `Order ID: ${orderId}\n` +
     `User ID: ${chatId}\n` +
-    `Ismi (Telegram): ${name}\n\n` +
+    `Ismi: ${name}\n` +
+    `Username: ${username}\n\n` +
     "Foydalanuvchi login so‘radi. Avval chek va ism-familiyani kuting.\n\n" +
     `Ma'lumot: /payinfo ${orderId}\n` +
     `Tasdiqlash: /approve ${orderId} LOGIN PAROL\n` +
@@ -458,12 +470,12 @@ bot.onText(/Get Login/, msg => {
 });
 
 
-// ==== ADMIN LOGIN BERISH (order bilan bog'liq bo'lmagan holda) ====
+// ==== ADMIN LOGIN BERISH (qo'lda) ====
 // /give USERID LOGIN PAROL
 bot.onText(/^\/give (\d+) (\S+) (\S+)/, (msg, match) => {
   const adminId = msg.chat.id;
   if (!isAdmin(adminId)) {
-    return bot.sendMessage(adminId, "⛔ Bu komanda faqat admin uchun!");
+    return bot.sendMessage(adminId, "⛔ Bu komanda faqat adminlar uchun!");
   }
 
   const userId = match[1];
@@ -474,12 +486,56 @@ bot.onText(/^\/give (\d+) (\S+) (\S+)/, (msg, match) => {
 });
 
 
+// ==== ADMIN – LOGINNI REVOKE QILISH ====
+// /revoke USER_ID [sababi ixtiyoriy]
+bot.onText(/^\/revoke (\d+)\s*([\s\S]*)/, (msg, match) => {
+  const adminId = msg.chat.id;
+  if (!isAdmin(adminId)) {
+    return bot.sendMessage(adminId, "⛔ Bu komanda faqat adminlar uchun!");
+  }
+
+  const userId = match[1];
+  const reason = (match[2] || "").trim();
+
+  const data = usedLogins[userId];
+  if (!data) {
+    return bot.sendMessage(adminId, "❓ Bu foydalanuvchiga login berilmagan yoki allaqachon o‘chirilgan.");
+  }
+
+  const oldLogin = data.login;
+  const oldPass = data.pass;
+
+  delete usedLogins[userId];
+
+  let userText =
+    "⚠️ Sizning premium obunangiz bekor qilindi.\n" +
+    "Login endi ishlamasligi mumkin.";
+
+  if (reason) {
+    userText += "\nSabab: " + reason;
+  }
+
+  bot.sendMessage(userId, userText).catch(() => {});
+
+  let adminText =
+    "🔴 LOGIN BEKOR QILINDI:\n" +
+    `User ID: ${userId}\n` +
+    `Oldingi login: ${oldLogin} | Parol: ${oldPass}\n`;
+
+  if (reason) {
+    adminText += "Sabab: " + reason + "\n";
+  }
+
+  sendToAdmins(adminText);
+});
+
+
 // ==== ADMIN TOLÒV MA'LUMOTINI KO‘RISH ====
 // /payinfo ORDERID
 bot.onText(/^\/payinfo (\S+)/, (msg, match) => {
   const adminId = msg.chat.id;
   if (!isAdmin(adminId)) {
-    return bot.sendMessage(adminId, "⛔ Bu komanda faqat admin uchun!");
+    return bot.sendMessage(adminId, "⛔ Bu komanda faqat adminlar uchun!");
   }
 
   const orderId = match[1];
@@ -518,7 +574,7 @@ bot.onText(/^\/payinfo (\S+)/, (msg, match) => {
 bot.onText(/^\/approve (\S+) (\S+) (\S+)/, (msg, match) => {
   const adminId = msg.chat.id;
   if (!isAdmin(adminId)) {
-    return bot.sendMessage(adminId, "⛔ Bu komanda faqat admin uchun!");
+    return bot.sendMessage(adminId, "⛔ Bu komanda faqat adminlar uchun!");
   }
 
   const orderId = match[1];
@@ -541,7 +597,7 @@ bot.onText(/^\/approve (\S+) (\S+) (\S+)/, (msg, match) => {
 bot.onText(/^\/reject (\S+) ([\s\S]+)/, (msg, match) => {
   const adminId = msg.chat.id;
   if (!isAdmin(adminId)) {
-    return bot.sendMessage(adminId, "⛔ Bu komanda faqat admin uchun!");
+    return bot.sendMessage(adminId, "⛔ Bu komanda faqat adminlar uchun!");
   }
 
   const orderId = match[1];
@@ -559,12 +615,9 @@ bot.onText(/^\/reject (\S+) ([\s\S]+)/, (msg, match) => {
     "❌ Sizning to‘lov so‘rovingiz rad etildi.\n" +
     `Order ID: ${orderId}\n` +
     `Sabab: ${reason}`
-  );
+  ).catch(() => {});
 
-  bot.sendMessage(
-    adminId,
-    `Order ${orderId} rad etildi.`
-  );
+  sendToAdmins(`Order ${orderId} rad etildi.\nSabab: ${reason}`);
 });
 
 
@@ -573,13 +626,13 @@ bot.onText(/^\/reject (\S+) ([\s\S]+)/, (msg, match) => {
 bot.onText(/^\/reply (\d+) ([\s\S]+)/, (msg, match) => {
   const adminId = msg.chat.id;
   if (!isAdmin(adminId)) {
-    return bot.sendMessage(adminId, "⛔ Bu komanda faqat admin uchun!");
+    return bot.sendMessage(adminId, "⛔ Bu komanda faqat adminlar uchun!");
   }
 
   const userId = match[1];
   const text = match[2];
 
-  bot.sendMessage(userId, `📩 Admin javobi:\n\n${text}`);
+  bot.sendMessage(userId, `📩 Admin javobi:\n\n${text}`).catch(() => {});
   bot.sendMessage(adminId, "✅ Javob yuborildi.");
 });
 
@@ -588,7 +641,7 @@ bot.onText(/^\/reply (\d+) ([\s\S]+)/, (msg, match) => {
 bot.onText(/\/stats/, msg => {
   const adminId = msg.chat.id;
   if (!isAdmin(adminId)) {
-    return bot.sendMessage(adminId, "⛔ Bu komanda faqat admin uchun!");
+    return bot.sendMessage(adminId, "⛔ Bu komanda faqat adminlar uchun!");
   }
   adminStats(adminId);
 });
@@ -597,7 +650,7 @@ bot.onText(/\/stats/, msg => {
 bot.onText(/\/logins/, msg => {
   const adminId = msg.chat.id;
   if (!isAdmin(adminId)) {
-    return bot.sendMessage(adminId, "⛔ Bu komanda faqat admin uchun!");
+    return bot.sendMessage(adminId, "⛔ Bu komanda faqat adminlar uchun!");
   }
   adminLogins(adminId);
 });
@@ -608,7 +661,7 @@ bot.onText(/\/logins/, msg => {
 bot.onText(/^\/broadcast ([\s\S]+)/, async (msg, match) => {
   const adminId = msg.chat.id;
   if (!isAdmin(adminId)) {
-    return bot.sendMessage(adminId, "⛔ Bu komanda faqat admin uchun!");
+    return bot.sendMessage(adminId, "⛔ Bu komanda faqat adminlar uchun!");
   }
 
   const text = match[1];
@@ -682,7 +735,7 @@ bot.onText(/Contact Support/, msg => {
 bot.onText(/^\/answer (\S+) ([\s\S]+)/, (msg, match) => {
   const adminId = msg.chat.id;
   if (!isAdmin(adminId)) {
-    return bot.sendMessage(adminId, "⛔ Bu komanda faqat admin uchun!");
+    return bot.sendMessage(adminId, "⛔ Bu komanda faqat adminlar uchun!");
   }
 
   const ticketId = match[1];
@@ -698,7 +751,7 @@ bot.onText(/^\/answer (\S+) ([\s\S]+)/, (msg, match) => {
   bot.sendMessage(
     ticket.userId,
     `📩 Sizning ticketingiz (${ticketId}) bo‘yicha javob:\n\n${answer}`
-  );
+  ).catch(() => {});
 
   bot.sendMessage(
     adminId,
@@ -715,13 +768,12 @@ bot.on("message", async msg => {
 
   rememberUser(msg);
 
-  // komandalar (/...) bu yerda qayta ishlanmaydi
   if (!text || text.startsWith("/")) return;
 
   const mode = modeMap[key];
   if (!mode) return;
 
-  // 🔹 Admin broadcast rejimi
+  // 🔹 Admin broadcast rejimi (tugma orqali)
   if (mode === "admin_broadcast" && isAdmin(chatId)) {
     if (!text.trim()) {
       bot.sendMessage(chatId, "⚠️ Matn bo‘sh bo‘lmasin. /cancel bilan bekor qilishingiz mumkin.");
@@ -774,8 +826,7 @@ bot.on("message", async msg => {
       order.cardHolder = cardHolder;
     }
 
-    bot.sendMessage(
-      ADMIN_ID,
+    sendToAdmins(
       "💳 TO‘LOV MA'LUMOTI KELDI:\n" +
       `Order ID: ${orderId}\n` +
       `User ID: ${chatId}\n` +
@@ -786,7 +837,10 @@ bot.on("message", async msg => {
     );
 
     if (fileId) {
-      bot.sendPhoto(ADMIN_ID, fileId, { caption: `Order ID: ${orderId} chek rasmi` });
+      sendToAdmins(`Order ${orderId} chek rasmi kelgan.`);
+      for (const adminId of ADMIN_IDS) {
+        bot.sendPhoto(adminId, fileId, { caption: `Order ID: ${orderId} chek rasmi` }).catch(() => {});
+      }
       if (order) {
         order.checkFileId = fileId;
       }
@@ -815,11 +869,14 @@ bot.on("message", async msg => {
       createdAt: Date.now()
     };
 
-    bot.sendMessage(
-      ADMIN_ID,
+    const info = userInfo[key] || {};
+    const username = info.username ? `@${info.username}` : "username yo‘q";
+
+    sendToAdmins(
       "📝 YANGI FEEDBACK TICKET:\n" +
       `Ticket ID: ${ticketId}\n` +
-      `User ID: ${chatId}\n\n` +
+      `User ID: ${chatId}\n` +
+      `Username: ${username}\n\n` +
       `${text}\n\n` +
       `Javob berish: /answer ${ticketId} Javob matni...`
     );
@@ -845,11 +902,14 @@ bot.on("message", async msg => {
       createdAt: Date.now()
     };
 
-    bot.sendMessage(
-      ADMIN_ID,
+    const info = userInfo[key] || {};
+    const username = info.username ? `@${info.username}` : "username yo‘q";
+
+    sendToAdmins(
       "⚠️ YANGI PROBLEM REPORT TICKET:\n" +
       `Ticket ID: ${ticketId}\n` +
-      `User ID: ${chatId}\n\n` +
+      `User ID: ${chatId}\n` +
+      `Username: ${username}\n\n` +
       `${text}\n\n` +
       `Javob berish: /answer ${ticketId} Javob matni...`
     );
@@ -875,11 +935,14 @@ bot.on("message", async msg => {
       createdAt: Date.now()
     };
 
-    bot.sendMessage(
-      ADMIN_ID,
+    const info = userInfo[key] || {};
+    const username = info.username ? `@${info.username}` : "username yo‘q";
+
+    sendToAdmins(
       "👤 YANGI SUPPORT TICKET:\n" +
       `Ticket ID: ${ticketId}\n` +
-      `User ID: ${chatId}\n\n` +
+      `User ID: ${chatId}\n` +
+      `Username: ${username}\n\n` +
       `${text}\n\n` +
       `Javob berish: /answer ${ticketId} Javob matni...`
     );
