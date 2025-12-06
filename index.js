@@ -1,8 +1,9 @@
 const TelegramBot = require("node-telegram-bot-api");
 
 // ==== CONFIG (ENV) ====
+// Railway'da BOT_TOKEN va ADMIN_ID ni Variables ichiga qo'yasan
 const TOKEN = process.env.BOT_TOKEN;
-const ADMIN_ID = process.env.ADMIN_ID; // bitta admin ID (string ko'rinishida bo'ladi)
+const ADMIN_ID = process.env.ADMIN_ID; // string bo'ladi
 
 if (!TOKEN || !ADMIN_ID) {
   console.error("❌ BOT_TOKEN yoki ADMIN_ID yo‘q. Env variables ni tekshiring.");
@@ -13,40 +14,44 @@ const bot = new TelegramBot(TOKEN, { polling: true });
 
 // ==== STATE ====
 
-// Loginlar (bitta userga bitta login) – key: userId (string)
-const usedLogins = {}; // { userId: { login, pass } }
+// Loginlar – key: userId(string)
+const usedLogins = {}; 
+// { userId: { login, pass, startAt, endAt } }
 
-// Rejimlar – key: userId (string)
-const modeMap = {};    // { userId: "feedback" | "problem" | "support" | "pay_check" | "card_holder" }
+// Rejimlar – key: userId(string)
+const modeMap = {};    
+// { userId: "feedback"|"problem"|"support"|"pay_check"|"card_holder"|"admin_broadcast" }
 
 // Vaqtincha ma'lumot – chek/card-holder/orderId uchun
-const tempData = {};   // { userId: { cardHolder, fileId, orderId } }
+const tempData = {};   
+// { userId: { cardHolder, fileId, orderId } }
 
 // Botni ishlatgan userlar ro‘yxati
 const users = new Set(); // masalan: "123456789"
 
 // Foydalanuvchi haqida ma'lumot (ism, username)
-const userInfo = {}; // { userId: { name, username } }
+const userInfo = {}; 
+// { userId: { name, username } }
 
 // To‘lov ORDER tizimi
 // orderId: "VGS-0001" kabi
-const orders = {}; // { orderId: { orderId, userId, status, cardHolder, checkFileId, createdAt } }
+const orders = {}; 
+// { orderId: { orderId, userId, status, cardHolder, checkFileId, createdAt } }
 let nextOrderNum = 1;
 
 // Support TICKET tizimi
 // ticketId: "T-0001"
-const tickets = {}; // { ticketId: { ticketId, userId, type, text, status, createdAt } }
+const tickets = {}; 
+// { ticketId: { ticketId, userId, type, text, status, createdAt } }
 let nextTicketNum = 1;
 
 
 // ==== HELPERS ====
 
-// userId ni stringga aylantirish
 function getKey(chatId) {
   return chatId.toString();
 }
 
-// User haqida ma'lumotni eslab qolish
 function rememberUser(msg) {
   const key = getKey(msg.chat.id);
   users.add(key);
@@ -56,52 +61,188 @@ function rememberUser(msg) {
   };
 }
 
-// Order ID generatsiya
 function generateOrderId() {
   const id = "VGS-" + String(nextOrderNum).padStart(4, "0");
   nextOrderNum++;
   return id;
 }
 
-// Ticket ID generatsiya
 function generateTicketId() {
   const id = "T-" + String(nextTicketNum).padStart(4, "0");
   nextTicketNum++;
   return id;
 }
 
-// Admin tekshiruvchi
 function isAdmin(id) {
   return id.toString() === ADMIN_ID.toString();
 }
 
-// Admin uchun login berish funksiyasi (bir nechta joyda ishlatamiz)
+// Sana formatlash (UZ uslubida)
+function formatDate(ts) {
+  return new Date(ts).toLocaleDateString("uz-UZ");
+}
+
+// Admin uchun login berish + premium muddati hisoblash
 function giveLoginToUser(userId, login, pass, orderId = null) {
-  usedLogins[userId] = { login, pass };
+  const now = Date.now();
+  const THIRTY_DAYS = 30 * 24 * 60 * 60 * 1000;
+  const startAt = now;
+  const endAt = now + THIRTY_DAYS;
+
+  usedLogins[userId] = { login, pass, startAt, endAt };
 
   const info = userInfo[userId] || {};
   const name = info.name ? `(${info.name})` : "";
+  const startStr = formatDate(startAt);
+  const endStr = formatDate(endAt);
 
   let text =
     "🔐 Login berildi!\n\n" +
     `Login: ${login}\n` +
-    `Parol: ${pass}\n`;
+    `Parol: ${pass}\n` +
+    `Premium obunangiz: ${startStr} sanasidan ${endStr} sanasigacha faol.\n`;
 
   if (orderId) {
     text += `Order ID: ${orderId}\n`;
   }
 
-  bot.sendMessage(
-    userId,
-    text
-  );
+  bot.sendMessage(userId, text);
 
   bot.sendMessage(
     ADMIN_ID,
     "✅ Login foydalanuvchiga yuborildi.\n" +
     `User ID: ${userId} ${name}` +
-    (orderId ? `\nOrder ID: ${orderId}` : "")
+    (orderId ? `\nOrder ID: ${orderId}` : "") +
+    `\nPremium: ${startStr} → ${endStr}`
   );
+}
+
+
+// ==== ADMIN FUNKSIYALAR ====
+
+function adminStats(chatId) {
+  const totalUsers = users.size;
+  const totalLogins = Object.keys(usedLogins).length;
+  const totalOrders = Object.keys(orders).length;
+  const totalTickets = Object.keys(tickets).length;
+
+  let pending = 0, approved = 0, rejected = 0;
+  for (const o of Object.values(orders)) {
+    if (o.status === "pending") pending++;
+    if (o.status === "approved") approved++;
+    if (o.status === "rejected") rejected++;
+  }
+
+  let openTickets = 0, answeredTickets = 0;
+  for (const t of Object.values(tickets)) {
+    if (t.status === "open") openTickets++;
+    if (t.status === "answered") answeredTickets++;
+  }
+
+  let activeSubs = 0, expiredSubs = 0;
+  const now = Date.now();
+  for (const l of Object.values(usedLogins)) {
+    if (l.endAt && l.endAt < now) expiredSubs++;
+    else activeSubs++;
+  }
+
+  bot.sendMessage(
+    chatId,
+    "📊 Vegas Bot Statistika:\n\n" +
+    `👥 Ro'yxatdagi userlar: ${totalUsers} ta\n` +
+    `🔐 Login berilgan userlar: ${totalLogins} ta\n` +
+    `   - Faol premium: ${activeSubs} ta\n` +
+    `   - Muddati tugagan: ${expiredSubs} ta\n\n` +
+    `💳 Jami orderlar: ${totalOrders} ta\n` +
+    `   - pending: ${pending}\n` +
+    `   - approved: ${approved}\n` +
+    `   - rejected: ${rejected}\n\n` +
+    `🎫 Jami ticketlar: ${totalTickets} ta\n` +
+    `   - open: ${openTickets}\n` +
+    `   - answered: ${answeredTickets}\n`
+  );
+}
+
+function adminLogins(chatId) {
+  const keys = Object.keys(usedLogins);
+  if (keys.length === 0) {
+    return bot.sendMessage(chatId, "Hali hech kimga login berilmagan.");
+  }
+
+  let text = "🔐 Loginlar va premium muddatlari:\n\n";
+  for (const userId of keys) {
+    const data = usedLogins[userId];
+    const info = userInfo[userId] || {};
+    const name = info.name || "Noma'lum";
+    const username = info.username ? `@${info.username}` : "username yo‘q";
+
+    const startStr = data.startAt ? formatDate(data.startAt) : "—";
+    const endStr = data.endAt ? formatDate(data.endAt) : "—";
+
+    text +=
+      `User ID: ${userId} | ${name} | ${username}\n` +
+      `   Login: ${data.login} | Parol: ${data.pass}\n` +
+      `   Premium: ${startStr} → ${endStr}\n\n`;
+  }
+
+  bot.sendMessage(chatId, text);
+}
+
+function adminOrdersPending(chatId) {
+  const pendingOrders = Object.values(orders).filter(o => o.status === "pending");
+  if (pendingOrders.length === 0) {
+    return bot.sendMessage(chatId, "⏳ Pending orderlar yo‘q.");
+  }
+
+  let text = "💳 Pending orderlar:\n\n";
+  for (const o of pendingOrders) {
+    const info = userInfo[o.userId] || {};
+    const name = info.name || "Noma'lum";
+    const username = info.username ? `@${info.username}` : "username yo‘q";
+    text +=
+      `Order ID: ${o.orderId}\n` +
+      `User ID: ${o.userId} | ${name} | ${username}\n` +
+      `Status: ${o.status}\n` +
+      `/payinfo ${o.orderId}\n` +
+      `/approve ${o.orderId} LOGIN PAROL\n` +
+      `/reject ${o.orderId} SABAB\n\n`;
+  }
+
+  bot.sendMessage(chatId, text);
+}
+
+function adminTicketsOpen(chatId) {
+  const openTickets = Object.values(tickets).filter(t => t.status === "open");
+  if (openTickets.length === 0) {
+    return bot.sendMessage(chatId, "🎫 Ochiq ticketlar yo‘q.");
+  }
+
+  let text = "🎫 Ochiq ticketlar:\n\n";
+  for (const t of openTickets) {
+    const info = userInfo[t.userId] || {};
+    const name = info.name || "Noma'lum";
+    const username = info.username ? `@${info.username}` : "username yo‘q";
+    text +=
+      `Ticket ID: ${t.ticketId} | Tur: ${t.type}\n` +
+      `User ID: ${t.userId} | ${name} | ${username}\n` +
+      `Matn: ${t.text.slice(0, 80)}${t.text.length > 80 ? "..." : ""}\n` +
+      `/answer ${t.ticketId} Javob...\n\n`;
+  }
+
+  bot.sendMessage(chatId, text);
+}
+
+function adminMenuKeyboard() {
+  return {
+    reply_markup: {
+      keyboard: [
+        ["📊 Stats", "🧾 Logins"],
+        ["💳 Orders pending", "🎫 Tickets open"],
+        ["📣 Broadcast", "❌ Close admin menu"]
+      ],
+      resize_keyboard: true
+    }
+  };
 }
 
 
@@ -140,8 +281,8 @@ bot.onText(/\/help/, msg => {
     chatId,
     "Yordam bo‘limi 📚\n\n" +
     "🔐 Get Login – to‘lov qilib platforma loginini olish\n" +
-    "📝 Send Feedback – kurs bo‘yicha fikr-mulohazangizni yozish\n" +
-    "⚠️ Report a Problem – texnik nosozliklarni yozish\n" +
+    "📝 Send Feedback – fikr-mulohazangizni yozish\n" +
+    "⚠️ Report a Problem – texnik nosozliklar uchun\n" +
     "👤 Contact Support – savollar uchun supportga murojaat\n\n" +
     "Istalgan payt /cancel yozib, jarayondan chiqishingiz mumkin."
   );
@@ -173,7 +314,75 @@ bot.onText(/\/cancel/, msg => {
 });
 
 
-// ==== LOGIN SO'ROVI (ORDER bilan) ====
+// ==== /menu_admin – admin tugmali panel ====
+bot.onText(/\/menu_admin/, msg => {
+  const chatId = msg.chat.id;
+  if (!isAdmin(chatId)) {
+    return bot.sendMessage(chatId, "⛔ Bu komanda faqat admin uchun!");
+  }
+
+  bot.sendMessage(
+    chatId,
+    "ADMIN PANEL 📌\nQuyidagi tugmalardan birini tanlang:",
+    adminMenuKeyboard()
+  );
+});
+
+// Admin tugmalari: 📊 Stats, 🧾 Logins, 💳 Orders pending, 🎫 Tickets open, 📣 Broadcast, ❌ Close admin menu
+bot.onText(/^📊 Stats$/, msg => {
+  const chatId = msg.chat.id;
+  if (!isAdmin(chatId)) return;
+  adminStats(chatId);
+});
+
+bot.onText(/^🧾 Logins$/, msg => {
+  const chatId = msg.chat.id;
+  if (!isAdmin(chatId)) return;
+  adminLogins(chatId);
+});
+
+bot.onText(/^💳 Orders pending$/, msg => {
+  const chatId = msg.chat.id;
+  if (!isAdmin(chatId)) return;
+  adminOrdersPending(chatId);
+});
+
+bot.onText(/^🎫 Tickets open$/, msg => {
+  const chatId = msg.chat.id;
+  if (!isAdmin(chatId)) return;
+  adminTicketsOpen(chatId);
+});
+
+bot.onText(/^📣 Broadcast$/, msg => {
+  const chatId = msg.chat.id;
+  const key = getKey(chatId);
+  if (!isAdmin(chatId)) return;
+
+  modeMap[key] = "admin_broadcast";
+  bot.sendMessage(chatId, "📣 Broadcast uchun matnni yozib yuboring. /cancel bilan bekor qilishingiz mumkin.");
+});
+
+bot.onText(/^❌ Close admin menu$/, msg => {
+  const chatId = msg.chat.id;
+  if (!isAdmin(chatId)) return;
+
+  bot.sendMessage(
+    chatId,
+    "Admin menyusi yopildi.",
+    {
+      reply_markup: {
+        keyboard: [
+          ["📝 Send Feedback", "⚠️ Report a Problem"],
+          ["🔐 Get Login", "👤 Contact Support"]
+        ],
+        resize_keyboard: true
+      }
+    }
+  );
+});
+
+
+// ==== LOGIN SO'ROVI (ORDER + PREMIUM) ====
 bot.onText(/Get Login/, msg => {
   const chatId = msg.chat.id;
   const key = getKey(chatId);
@@ -184,11 +393,18 @@ bot.onText(/Get Login/, msg => {
   // Agar oldin login berilgan bo'lsa — eski loginni ko'rsatamiz
   if (usedLogins[key]) {
     const l = usedLogins[key];
+    const startStr = l.startAt ? formatDate(l.startAt) : "—";
+    const endStr = l.endAt ? formatDate(l.endAt) : "—";
+    const now = Date.now();
+    const active = l.endAt && l.endAt > now;
+
     bot.sendMessage(
       chatId,
       "🔐 Sizga avval berilgan login mavjud:\n\n" +
       `Login: ${l.login}\n` +
-      `Parol: ${l.pass}`
+      `Parol: ${l.pass}\n` +
+      `Premium obuna: ${startStr} → ${endStr}\n` +
+      `Status: ${active ? "Faol ✅" : "Muddati tugagan ⌛"}`
     );
     return;
   }
@@ -204,7 +420,6 @@ bot.onText(/Get Login/, msg => {
     createdAt: Date.now()
   };
 
-  // tempData ichida ham saqlaymiz (chek/card-holder flow uchun)
   tempData[key] = { orderId };
 
   // To'lov ma'lumoti
@@ -218,17 +433,15 @@ bot.onText(/Get Login/, msg => {
     { parse_mode: "Markdown" }
   );
 
-  // Ogohlantirish va qadamlar
   bot.sendMessage(
     chatId,
     "⚠️ *Cheksiz to‘lov qabul qilinmaydi!*\n\n" +
     "1️⃣ Avval *to‘lov chekini (screenshot)* rasm qilib yuboring.\n" +
     "2️⃣ So‘ngra *card-holder* (karta egasi ismi-familyasi) ni yozing.\n\n" +
-    "⏳ Login berilishi uchun to‘lov admin tomonidan tekshiriladi.",
+    "⏳ To‘lov admin tomonidan tekshirilgach, 1 oylik premium obunangiz yoqiladi.",
     { parse_mode: "Markdown" }
   );
 
-  // Admin uchun signal
   bot.sendMessage(
     ADMIN_ID,
     "📥 YANGI LOGIN/TOLÒV SO‘ROVI:\n" +
@@ -241,20 +454,19 @@ bot.onText(/Get Login/, msg => {
     `Rad etish: /reject ${orderId} SABAB`
   );
 
-  // Endi chek kutamiz
   modeMap[key] = "pay_check";
 });
 
 
 // ==== ADMIN LOGIN BERISH (order bilan bog'liq bo'lmagan holda) ====
-// format: /give USERID LOGIN PAROL
+// /give USERID LOGIN PAROL
 bot.onText(/^\/give (\d+) (\S+) (\S+)/, (msg, match) => {
   const adminId = msg.chat.id;
   if (!isAdmin(adminId)) {
     return bot.sendMessage(adminId, "⛔ Bu komanda faqat admin uchun!");
   }
 
-  const userId = match[1]; // string
+  const userId = match[1];
   const login = match[2];
   const pass = match[3];
 
@@ -323,6 +535,7 @@ bot.onText(/^\/approve (\S+) (\S+) (\S+)/, (msg, match) => {
   giveLoginToUser(order.userId, login, pass, orderId);
 });
 
+
 // ==== ADMIN REJECT ====
 // /reject ORDERID SABAB...
 bot.onText(/^\/reject (\S+) ([\s\S]+)/, (msg, match) => {
@@ -355,8 +568,8 @@ bot.onText(/^\/reject (\S+) ([\s\S]+)/, (msg, match) => {
 });
 
 
-// ==== ADMIN REPLY (ticketdan tashqari oddiy javob) ====
-// format: /reply USERID Javob matni
+// ==== ADMIN REPLY (oddiy) ====
+// /reply USERID Matn...
 bot.onText(/^\/reply (\d+) ([\s\S]+)/, (msg, match) => {
   const adminId = msg.chat.id;
   if (!isAdmin(adminId)) {
@@ -371,73 +584,63 @@ bot.onText(/^\/reply (\d+) ([\s\S]+)/, (msg, match) => {
 });
 
 
-// ==== ADMIN STATS ====
-// /stats – umumiy statistikalar
+// ==== /stats – admin statistikasi ====
 bot.onText(/\/stats/, msg => {
   const adminId = msg.chat.id;
   if (!isAdmin(adminId)) {
     return bot.sendMessage(adminId, "⛔ Bu komanda faqat admin uchun!");
   }
-
-  const totalUsers = users.size;
-  const totalLogins = Object.keys(usedLogins).length;
-  const totalOrders = Object.keys(orders).length;
-  const totalTickets = Object.keys(tickets).length;
-
-  let pending = 0, approved = 0, rejected = 0;
-  for (const o of Object.values(orders)) {
-    if (o.status === "pending") pending++;
-    if (o.status === "approved") approved++;
-    if (o.status === "rejected") rejected++;
-  }
-
-  let openTickets = 0, answeredTickets = 0;
-  for (const t of Object.values(tickets)) {
-    if (t.status === "open") openTickets++;
-    if (t.status === "answered") answeredTickets++;
-  }
-
-  bot.sendMessage(
-    adminId,
-    "📊 Vegas Bot Statistika:\n\n" +
-    `👥 Ro'yxatdagi userlar: ${totalUsers} ta\n` +
-    `🔐 Login berilgan userlar: ${totalLogins} ta\n\n` +
-    `💳 Jami orderlar: ${totalOrders} ta\n` +
-    `   - pending: ${pending}\n` +
-    `   - approved: ${approved}\n` +
-    `   - rejected: ${rejected}\n\n` +
-    `🎫 Jami ticketlar: ${totalTickets} ta\n` +
-    `   - open: ${openTickets}\n` +
-    `   - answered: ${answeredTickets}\n`
-  );
+  adminStats(adminId);
 });
 
-// ==== ADMIN – LOGINLAR RO‘YXATI ====
-// /logins – kimga qaysi login/parol berilgan
+// ==== /logins – admin loginlar ro'yxati ====
 bot.onText(/\/logins/, msg => {
   const adminId = msg.chat.id;
   if (!isAdmin(adminId)) {
     return bot.sendMessage(adminId, "⛔ Bu komanda faqat admin uchun!");
   }
+  adminLogins(adminId);
+});
 
-  const keys = Object.keys(usedLogins);
-  if (keys.length === 0) {
-    return bot.sendMessage(adminId, "Hali hech kimga login berilmagan.");
+
+// ==== ADMIN BROADCAST (/broadcast) ====
+// /broadcast Matn...
+bot.onText(/^\/broadcast ([\s\S]+)/, async (msg, match) => {
+  const adminId = msg.chat.id;
+  if (!isAdmin(adminId)) {
+    return bot.sendMessage(adminId, "⛔ Bu komanda faqat admin uchun!");
   }
 
-  let text = "🔐 Loginlar ro‘yxati:\n\n";
-  for (const userId of keys) {
-    const data = usedLogins[userId];
-    const info = userInfo[userId] || {};
-    const name = info.name || "Noma'lum";
-    const username = info.username ? `@${info.username}` : "username yo‘q";
-
-    text +=
-      `User ID: ${userId} | ${name} | ${username}\n` +
-      `   Login: ${data.login} | Parol: ${data.pass}\n\n`;
+  const text = match[1];
+  if (!text || !text.trim()) {
+    return bot.sendMessage(adminId, "⚠️ Matn bo‘sh bo‘lmasligi kerak.");
   }
 
-  bot.sendMessage(adminId, text);
+  if (users.size === 0) {
+    return bot.sendMessage(adminId, "Hali birorta user ro'yxatga tushmagan.");
+  }
+
+  bot.sendMessage(adminId, `📨 Broadcast boshlanyapti. Jami userlar: ${users.size} ta.`);
+
+  let ok = 0, fail = 0;
+
+  for (const userId of users) {
+    try {
+      await bot.sendMessage(
+        userId,
+        "📢 *Vegas e'loni:*\n\n" + text,
+        { parse_mode: "Markdown" }
+      );
+      ok++;
+    } catch (e) {
+      fail++;
+    }
+  }
+
+  bot.sendMessage(
+    adminId,
+    `✅ Tugadi.\nYuborildi: ${ok} ta\nXato: ${fail} ta`
+  );
 });
 
 
@@ -505,19 +708,57 @@ bot.onText(/^\/answer (\S+) ([\s\S]+)/, (msg, match) => {
 
 
 // ==== MATN XABARLAR (mode bo‘yicha) ====
-// bu yerda card-holder, feedback, problem, support TICKET sifatida yaratiladi
-bot.on("message", msg => {
+bot.on("message", async msg => {
   const chatId = msg.chat.id;
   const key = getKey(chatId);
   const text = msg.text;
 
   rememberUser(msg);
 
-  // komandalar bu yerda qayta ishlanmaydi
+  // komandalar (/...) bu yerda qayta ishlanmaydi
   if (!text || text.startsWith("/")) return;
 
   const mode = modeMap[key];
   if (!mode) return;
+
+  // 🔹 Admin broadcast rejimi
+  if (mode === "admin_broadcast" && isAdmin(chatId)) {
+    if (!text.trim()) {
+      bot.sendMessage(chatId, "⚠️ Matn bo‘sh bo‘lmasin. /cancel bilan bekor qilishingiz mumkin.");
+      return;
+    }
+
+    if (users.size === 0) {
+      bot.sendMessage(chatId, "Hali birorta user ro'yxatga tushmagan.");
+      modeMap[key] = null;
+      return;
+    }
+
+    bot.sendMessage(chatId, `📨 Broadcast boshlanyapti. Jami userlar: ${users.size} ta.`);
+
+    let ok = 0, fail = 0;
+
+    for (const userId of users) {
+      try {
+        await bot.sendMessage(
+          userId,
+          "📢 *Vegas e'loni:*\n\n" + text,
+          { parse_mode: "Markdown" }
+        );
+        ok++;
+      } catch (e) {
+        fail++;
+      }
+    }
+
+    bot.sendMessage(
+      chatId,
+      `✅ Tugadi.\nYuborildi: ${ok} ta\nXato: ${fail} ta`
+    );
+
+    modeMap[key] = null;
+    return;
+  }
 
   // 1) Card-holder (chekdan keyin)
   if (mode === "card_holder") {
@@ -533,7 +774,6 @@ bot.on("message", msg => {
       order.cardHolder = cardHolder;
     }
 
-    // Adminga to'lov ma'lumoti
     bot.sendMessage(
       ADMIN_ID,
       "💳 TO‘LOV MA'LUMOTI KELDI:\n" +
@@ -545,7 +785,6 @@ bot.on("message", msg => {
       `Rad etish: /reject ${orderId} SABAB`
     );
 
-    // Agar chek rasm bor bo'lsa — yuboramiz
     if (fileId) {
       bot.sendPhoto(ADMIN_ID, fileId, { caption: `Order ID: ${orderId} chek rasmi` });
       if (order) {
@@ -556,7 +795,7 @@ bot.on("message", msg => {
     bot.sendMessage(
       chatId,
       "Rahmat! ✅ Ma’lumotlaringiz adminga yuborildi.\n" +
-      "To‘lov tasdiqlangach, login-parol beriladi."
+      "To‘lov tasdiqlangach, 1 oylik premium obunangiz yoqiladi."
     );
 
     modeMap[key] = null;
@@ -564,7 +803,7 @@ bot.on("message", msg => {
     return;
   }
 
-  // 2) Feedback – TICKET sifatida
+  // 2) Feedback – TICKET
   if (mode === "feedback") {
     const ticketId = generateTicketId();
     tickets[ticketId] = {
@@ -664,7 +903,6 @@ bot.on("photo", async msg => {
 
   rememberUser(msg);
 
-  // faqat pay_check holatida chekni qabul qilamiz
   if (mode !== "pay_check") return;
 
   const photos = msg.photo;
@@ -684,6 +922,5 @@ bot.on("photo", async msg => {
     { parse_mode: "Markdown" }
   );
 
-  // endi card-holderni kutamiz
   modeMap[key] = "card_holder";
 });
