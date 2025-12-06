@@ -57,7 +57,7 @@ bot.onText(/Get Login/, msg => {
     "💳 TO'LOV MA'LUMOTI:\n\n" +
     `Karta: 9860 0366 2880 7194\n` +
     `Card-holder: Buxoriddinov Muhammad\n` +
-    `Narx: 1 oy = 50 000 so'm\n`
+    `Narx: 1 oy = 2,99$ (36 000 so'm)\n`
   );
 
   // Ogohlantirish va qadamlar
@@ -262,6 +262,7 @@ bot.on("photo", async msg => {
   // endi card-holderni kutamiz
   modeMap[chatId] = "card_holder";
 });
+
 
 
 
